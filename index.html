@@ -1,41 +1,38 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Quick Map Test</title>
+    <title>Robot Tracker Live</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        /* اگه صفحه سفید موند یعنی کلاً لود نشده، اگه خاکستری شد یعنی موتور کار می‌کنه ولی عکس نقشه نمیاد */
-        body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; background: #cccccc; }
-        #debug { position: absolute; top: 10px; left: 50px; z-index: 1000; background: white; padding: 5px; }
+        body, html, #map { height: 100%; margin: 0; padding: 0; }
+        #status { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 8px; border-radius: 5px; font-family: sans-serif; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
     </style>
 </head>
 <body>
+    <div id="status">در حال اتصال به ماهواره...</div>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const channelID = "3260238";
+        const map = L.map('map').setView([35.7, 51.4], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        let marker = L.marker([35.7, 51.4]).addTo(map);
 
-<div id="debug">در حال بارگذاری موتور نقشه...</div>
-<div id="map"></div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-    document.getElementById('debug').innerHTML = "موتور لود شد. در حال فراخوانی نقشه...";
-    
-    // مختصات تهران برای تست اولیه
-    var map = L.map('map').setView([35.6892, 51.3890], 13);
-
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: 'OSM'
-    }).on('tileerror', function(e) {
-        document.getElementById('debug').innerHTML = "خطا در بارگذاری عکس‌های نقشه (احتمال فیلترینگ)";
-    }).addTo(map);
-
-    L.marker([35.6892, 51.3890]).addTo(map)
-        .bindPopup('تست موقعیت')
-        .openPopup();
-
-    document.getElementById('debug').innerHTML = "نقشه فراخوانی شد.";
-</script>
+        async function update() {
+            try {
+                const r = await fetch(`https://api.thingspeak.com/channels/${channelID}/feeds.json?results=1`);
+                const d = await r.json();
+                const f = d.feeds[0];
+                const p = [parseFloat(f.field1), parseFloat(f.field2)];
+                marker.setLatLng(p);
+                map.panTo(p);
+                document.getElementById('status').innerText = "بروزرسانی: " + new Date().toLocaleTimeString();
+            } catch (e) { document.getElementById('status').innerText = "خطا در دریافت دیتا"; }
+        }
+        setInterval(update, 15000);
+        update();
+    </script>
 </body>
 </html>
