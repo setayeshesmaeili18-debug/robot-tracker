@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html>
 <head>
@@ -6,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>ThingSpeak Robot Tracker</title>
   <link rel="stylesheet" href="leaflet.css" />
-    integrity="sha256-sA+e2YrgCw7qYc6k3mQd3bFhJkQ+Wv4m9g9g3A9gF3s=" crossorigin=""/>
+  
   <style>
     html,body,#map { height:100%; margin:0; padding:0; }
     .attribution { position: absolute; right: 8px; bottom: 8px; z-index: 1000; background: rgba(255,255,255,0.8); padding:6px; border-radius:6px; font-size:12px; }
@@ -17,29 +16,22 @@
 <div class="attribution">Live tracker — polls ThingSpeak every 15s</div>
 
 <script src="leaflet.js"></script>
-  integrity="sha256-o9N1j8VQpVY2s0nQ1RzF1G8ZkE2v1dG0rQ8f7k8tY+M=" crossorigin=""></script>
 
 <script>
-/* -------- CONFIG --------
-   Replace CHANNEL_ID with your ThingSpeak channel ID.
-   If the channel is private, include &api_key=READ_API_KEY in the URL below.
-*/
-const CHANNEL_ID = 123456; // <-- REPLACE with your channel id
-const FIELD_LAT = 'field1'; // which field contains latitude
-const FIELD_LON = 'field2'; // which field contains longitude
-const POLL_INTERVAL_MS = 15000; // ThingSpeak free limit: 15s
-const DECIMALS = 6; // keep 6 decimals (~11 cm resolution)
+/* -------- CONFIG -------- */
+const CHANNEL_ID = 3260238; // آی‌دی کانال تو که فرستاده بودی
+const FIELD_LAT = 'field1'; 
+const FIELD_LON = 'field2'; 
+const POLL_INTERVAL_MS = 15000; 
+const DECIMALS = 6; 
 
-/* -------- Helper functions -------- */
 function fmt(n){ return Number(Number(n).toFixed(DECIMALS)); }
 
-/* Build ThingSpeak JSON URL for last feed */
 function buildUrl(){
-  // Public channel: no API key needed. For private channels append ?api_key=READ_KEY
+  // اگه کانالت Private هست، ته این آدرس عبارت &api_key=YOUR_READ_KEY رو اضافه کن
   return `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?results=1`;
 }
 
-/* -------- Leaflet map init -------- */
 const map = L.map('map', {zoomControl:true}).setView([0,0], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
@@ -47,8 +39,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 let marker = null;
 let lastPos = null;
-let animStart = null;
-let animDuration = 1000; // ms interpolation duration between updates
+let animDuration = 1000; 
 
 function setMarker(lat, lon){
   const latf = fmt(lat), lonf = fmt(lon);
@@ -59,7 +50,6 @@ function setMarker(lat, lon){
     lastPos = newLatLng;
     return;
   }
-  // Smooth slide: interpolate from lastPos to newLatLng
   const start = lastPos;
   const end = newLatLng;
   const t0 = performance.now();
@@ -72,12 +62,9 @@ function setMarker(lat, lon){
     else lastPos = end;
   }
   requestAnimationFrame(step);
-  // gently pan map if marker approaches edge
   map.panTo(newLatLng, {animate: true, duration: 0.8});
 }
 
-/* -------- Polling -------- */
-let lastTimestamp = null;
 async function pollOnce(){
   try{
     const url = buildUrl();
@@ -86,21 +73,10 @@ async function pollOnce(){
     const json = await r.json();
     if(!json || !json.feeds || json.feeds.length===0) return;
     const feed = json.feeds[0];
-    // prefer numeric fields; if you used field names like field1/field2 adapt accordingly
-    let lat = feed[FIELD_LAT.replace('field','') ? FIELD_LAT : 'field1'];
-    let lon = feed[FIELD_LON.replace('field','') ? FIELD_LON : 'field2'];
-    // If above didn't resolve, try numeric field indices:
-    // ThingSpeak JSON uses keys 'field1', 'field2' etc.
-    lat = feed.field1 || feed.field_lat || feed.latitude || feed['field1'];
-    lon = feed.field2 || feed.field_lon || feed.longitude || feed['field2'];
-    // Convert to numbers and guard
-    lat = Number(lat);
-    lon = Number(lon);
+    let lat = Number(feed.field1);
+    let lon = Number(feed.field2);
     if(Number.isFinite(lat) && Number.isFinite(lon)){
       setMarker(lat, lon);
-      lastTimestamp = feed.created_at || new Date().toISOString();
-    } else {
-      console.warn('Invalid coords from ThingSpeak:', feed);
     }
   }catch(err){
     console.error('Poll error', err);
@@ -109,9 +85,6 @@ async function pollOnce(){
 
 pollOnce();
 setInterval(pollOnce, POLL_INTERVAL_MS);
-
-/* -------- Debug helper to show raw feed in console -------- */
-window.dumpLast = ()=>{ console.log('last feed ts:', lastTimestamp); };
 </script>
 </body>
 </html>
