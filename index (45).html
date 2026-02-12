@@ -1,69 +1,117 @@
+
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Safe Tracker</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <title>ThingSpeak Robot Tracker</title>
+  <link rel="stylesheet" href="leaflet.css" />
+    integrity="sha256-sA+e2YrgCw7qYc6k3mQd3bFhJkQ+Wv4m9g9g3A9gF3s=" crossorigin=""/>
   <style>
-    html,body,#map { height:100%; margin:0; padding:0; background: #eee; }
-    .status { position: absolute; top: 10px; right: 10px; z-index: 1000; background: white; padding: 5px 10px; border-radius: 4px; font-family: sans-serif; font-size: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+    html,body,#map { height:100%; margin:0; padding:0; }
+    .attribution { position: absolute; right: 8px; bottom: 8px; z-index: 1000; background: rgba(255,255,255,0.8); padding:6px; border-radius:6px; font-size:12px; }
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="status" id="stat">Connecting...</div>
+<div id="map"></div>
+<div class="attribution">Live tracker — polls ThingSpeak every 15s</div>
+
+<script src="leaflet.js"></script>
+  integrity="sha256-o9N1j8VQpVY2s0nQ1RzF1G8ZkE2v1dG0rQ8f7k8tY+M=" crossorigin=""></script>
+
 <script>
-  const CHANNEL_ID = 3260238;
-  const map = L.map('map').setView([35.7, 51.4], 13);
-  let marker = null;
+/* -------- CONFIG --------
+   Replace CHANNEL_ID with your ThingSpeak channel ID.
+   If the channel is private, include &api_key=READ_API_KEY in the URL below.
+*/
+const CHANNEL_ID = 123456; // <-- REPLACE with your channel id
+const FIELD_LAT = 'field1'; // which field contains latitude
+const FIELD_LON = 'field2'; // which field contains longitude
+const POLL_INTERVAL_MS = 15000; // ThingSpeak free limit: 15s
+const DECIMALS = 6; // keep 6 decimals (~11 cm resolution)
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19
-  }).addTo(map);
+/* -------- Helper functions -------- */
+function fmt(n){ return Number(Number(n).toFixed(DECIMALS)); }
 
-  async function updateMap() {
-    try {
-      const response = await fetch(`https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?results=1`, { cache: "no-store" });
-      
-      if (!response.ok) throw new Error("HTTP " + response.status);
+/* Build ThingSpeak JSON URL for last feed */
+function buildUrl(){
+  // Public channel: no API key needed. For private channels append ?api_key=READ_KEY
+  return `https://api.thingspeak.com/channels/${CHANNEL_ID}/feeds.json?results=1`;
+}
 
-      const data = await response.json();
+/* -------- Leaflet map init -------- */
+const map = L.map('map', {zoomControl:true}).setView([0,0], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
 
-      if (!data.feeds || data.feeds.length === 0) {
-        document.getElementById('stat').innerText = 'No data yet';
-        return;
-      }
+let marker = null;
+let lastPos = null;
+let animStart = null;
+let animDuration = 1000; // ms interpolation duration between updates
 
-      const feed = data.feeds[0];
-      const lat = parseFloat(feed.field1);
-      const lon = parseFloat(feed.field2);
-
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        const pos = [Number(lat.toFixed(6)), Number(lon.toFixed(6))];
-
-        if (!marker) {
-          marker = L.marker(pos).addTo(map);
-          map.setView(pos, 16);
-        } else {
-          marker.setLatLng(pos);
-        }
-
-        document.getElementById('stat').innerText =
-          'Last update: ' + new Date(feed.created_at).toLocaleTimeString();
-      } else {
-        document.getElementById('stat').innerText = 'Invalid coordinates';
-      }
-
-    } catch (e) {
-      console.error(e);
-      document.getElementById('stat').innerText = 'Connection error';
-    }
+function setMarker(lat, lon){
+  const latf = fmt(lat), lonf = fmt(lon);
+  const newLatLng = L.latLng(latf, lonf);
+  if(!marker){
+    marker = L.marker(newLatLng).addTo(map);
+    map.setView(newLatLng, 17);
+    lastPos = newLatLng;
+    return;
   }
+  // Smooth slide: interpolate from lastPos to newLatLng
+  const start = lastPos;
+  const end = newLatLng;
+  const t0 = performance.now();
+  function step(now){
+    const t = Math.min(1, (now - t0)/animDuration);
+    const lat = start.lat + (end.lat - start.lat) * t;
+    const lng = start.lng + (end.lng - start.lng) * t;
+    marker.setLatLng([lat,lng]);
+    if(t < 1) requestAnimationFrame(step);
+    else lastPos = end;
+  }
+  requestAnimationFrame(step);
+  // gently pan map if marker approaches edge
+  map.panTo(newLatLng, {animate: true, duration: 0.8});
+}
 
-  updateMap();
-  setInterval(updateMap, 15000);
+/* -------- Polling -------- */
+let lastTimestamp = null;
+async function pollOnce(){
+  try{
+    const url = buildUrl();
+    const r = await fetch(url, {cache: "no-store"});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const json = await r.json();
+    if(!json || !json.feeds || json.feeds.length===0) return;
+    const feed = json.feeds[0];
+    // prefer numeric fields; if you used field names like field1/field2 adapt accordingly
+    let lat = feed[FIELD_LAT.replace('field','') ? FIELD_LAT : 'field1'];
+    let lon = feed[FIELD_LON.replace('field','') ? FIELD_LON : 'field2'];
+    // If above didn't resolve, try numeric field indices:
+    // ThingSpeak JSON uses keys 'field1', 'field2' etc.
+    lat = feed.field1 || feed.field_lat || feed.latitude || feed['field1'];
+    lon = feed.field2 || feed.field_lon || feed.longitude || feed['field2'];
+    // Convert to numbers and guard
+    lat = Number(lat);
+    lon = Number(lon);
+    if(Number.isFinite(lat) && Number.isFinite(lon)){
+      setMarker(lat, lon);
+      lastTimestamp = feed.created_at || new Date().toISOString();
+    } else {
+      console.warn('Invalid coords from ThingSpeak:', feed);
+    }
+  }catch(err){
+    console.error('Poll error', err);
+  }
+}
+
+pollOnce();
+setInterval(pollOnce, POLL_INTERVAL_MS);
+
+/* -------- Debug helper to show raw feed in console -------- */
+window.dumpLast = ()=>{ console.log('last feed ts:', lastTimestamp); };
 </script>
-
 </body>
 </html>
